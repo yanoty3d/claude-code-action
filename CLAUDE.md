@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code when working with code in this repository.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Development Tools
 
@@ -14,45 +14,82 @@ This file provides guidance to Claude Code when working with code in this reposi
 # Test
 bun test
 
+# Type checking
+bun run typecheck
+
 # Formatting
 bun run format          # Format code with prettier
 bun run format:check    # Check code formatting
+
+# Install git hooks
+bun run install-hooks
 ```
 
 ## Architecture Overview
 
-This is a GitHub Action that enables Claude to interact with GitHub PRs and issues. The action:
+This is a GitHub Action that enables Claude to interact with GitHub PRs and issues. It's a fork of the official Claude Code Action with added OAuth authentication support for Claude Max subscribers.
 
-1. **Trigger Detection**: Uses `check-trigger.ts` to determine if Claude should respond based on comment/issue content
-2. **Context Gathering**: Fetches GitHub data (PRs, issues, comments) via `github-data-fetcher.ts` and formats it using `github-data-formatter.ts`
-3. **AI Integration**: Supports multiple Claude providers (Anthropic API, AWS Bedrock, Google Vertex AI)
-4. **Prompt Creation**: Generates context-rich prompts using `create-prompt.ts`
-5. **MCP Server Integration**: Installs and configures GitHub MCP server for extended functionality
+### Action Workflow
+
+1. **Trigger Detection**: Validates human actor and checks for `@claude` mentions (customizable via `trigger_phrase`) or issue assignments
+2. **Permission Validation**: Ensures write permissions for the repository
+3. **Comment Creation**: Posts initial tracking comment with progress checkboxes
+4. **Branch Management**: 
+   - Issues: Always creates new branch
+   - Open PRs: Pushes to existing branch  
+   - Closed PRs: Creates new branch
+5. **Context Gathering**: Fetches PR/issue data, comments, files, and reviews
+6. **Prompt Generation**: Creates detailed prompt with context and instructions
+7. **Claude Execution**: Runs Claude with configured tools and model
+8. **Result Updates**: Updates comment with final results and job links
 
 ### Key Components
 
-- **Trigger System**: Responds to `/claude` comments or issue assignments
-- **Authentication**: OIDC-based token exchange for secure GitHub interactions
-- **Cloud Integration**: Supports direct Anthropic API, AWS Bedrock, and Google Vertex AI
-- **GitHub Operations**: Creates branches, posts comments, and manages PRs/issues
+#### Entry Points (`src/entrypoints/`)
+- `prepare.ts`: Main orchestrator for the GitHub Action workflow
+- `update-comment-link.ts`: Updates comments with job links post-execution
 
-### Project Structure
+#### GitHub Integration (`src/github/`)
+- **API**: Octokit-based client with OIDC token exchange
+- **Context**: Parses GitHub event payloads
+- **Data**: 
+  - `fetcher.ts`: Retrieves PR/issue data, comments, reviews
+  - `formatter.ts`: Formats GitHub data for prompt generation
+- **Operations**: 
+  - Branch creation and management
+  - Comment creation and updates with progress tracking
+- **Validation**: Human actor verification, permissions, trigger checking
 
-```
-src/
-├── check-trigger.ts        # Determines if Claude should respond
-├── create-prompt.ts        # Generates contextual prompts
-├── github-data-fetcher.ts  # Retrieves GitHub data
-├── github-data-formatter.ts # Formats GitHub data for prompts
-├── install-mcp-server.ts  # Sets up GitHub MCP server
-├── update-comment-with-link.ts # Updates comments with job links
-└── types/
-    └── github.ts          # TypeScript types for GitHub data
-```
+#### Prompt Creation (`src/create-prompt/`)
+- Generates context-rich prompts for different event types
+- Manages allowed/disallowed tools configuration
+- Includes repository-specific instructions from CLAUDE.md
 
-## Important Notes
+#### MCP Server (`src/mcp/`)
+- GitHub file operations server for extended functionality
+- Automatic installation and configuration
 
-- Actions are triggered by `@claude` comments or issue assignment unless a different trigger_phrase is specified
-- The action creates branches for issues and pushes to PR branches directly
-- All actions create OIDC tokens for secure authentication
-- Progress is tracked through dynamic comment updates with checkboxes
+### Authentication Methods
+
+- **Direct API**: Uses `ANTHROPIC_API_KEY`
+- **OAuth**: For Claude Max subscribers (requires `claude_oauth_allowed_emails`)
+- **AWS Bedrock**: Via `aws_iam_role` and cross-account assume
+- **Google Vertex AI**: Via Workload Identity Federation
+
+### Testing
+
+Tests use Bun's built-in test runner. Key test files:
+- `test/trigger-validation.test.ts`: Trigger phrase detection
+- `test/permissions.test.ts`: Permission validation logic
+- `test/branch-cleanup.test.ts`: Branch name sanitization
+- `test/comment-logic.test.ts`: Comment creation/update logic
+- `test/create-prompt.test.ts`: Prompt generation
+- `test/data-formatter.test.ts`: GitHub data formatting
+
+### Important Implementation Details
+
+- Branch names are sanitized to be GitHub-compatible (alphanumeric, hyphens, underscores)
+- Comments use a specific format with `<!-- claude-code:issue-comment:START -->` markers
+- Progress is tracked with visual checkboxes that update in real-time
+- The action supports custom model selection via `anthropic_model` input
+- Tool availability can be controlled via `allowed_tools` and `disallowed_tools` inputs
